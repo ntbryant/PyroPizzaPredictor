@@ -1,0 +1,67 @@
+---
+title: "Pyro Pizza"
+output: 
+   html_notebook:
+      code_folding: hide
+      toc: true
+      toc_float: true
+      theme: simplex
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 14px;
+}
+code.r{
+  font-size: 20px;
+}
+pre {
+  font-size: 20px
+}
+</style>
+
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+
+library(googlesheets)
+library(dplyr)
+library(data.table)
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(lubridate)
+library(colorspace)
+library(scales)
+library(plotly)
+library(ggplot2)
+library(tidyr)
+library(weatherData)
+knitr::opts_chunk$set(fig.height=5, fig.width=7)
+
+# Gathering the data
+# (my_sheets <- gs_ls())
+# fin2016 = gs_title("2016 Springwater Ledger")
+pyro = gs_key("1MzRbJdaHKv9CJMPeN7Z-WQtdoGuLWAyE9gvYS-_Mgc8")
+# gs_ws_ls(fin2016)
+inventory = pyro %>% gs_read_csv(ws = "12th INVENTORY", skip=0) %>% as.data.table
+
+# fixing the dates in the 2016 data
+setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par","prep_rec","prep_actual","waste","final_inventory","short_long","scale","use_expected","use_actual","temp","precip","clouds","sun","wind","humidity","holiday","event"))
+inventory = inventory[-1]
+inventory[,date:=mdy(date)]
+
+```
+
+# Pulling in the Weather Data
+
+```{r}
+
+showAvailableColumns("PDX", "2016-12-19", end_date="2017-04-09")
+weather = setDT(getWeatherForDate("PDX", "2016-12-19", end_date="2017-04-09",
+                                  opt_custom_columns=TRUE, custom_columns=c(1:10)))
+weather[,date:=as.Date(as.character(Date))]
+
+
+```
+
