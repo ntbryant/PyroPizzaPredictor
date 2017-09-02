@@ -25,21 +25,28 @@ pre {
 ```{r, warning=FALSE, message=FALSE, results='hide'}
 
 library(googlesheets)
-library(dplyr)
 library(data.table)
-library(tm)
-library(SnowballC)
-library(wordcloud)
+library(dplyr)
+library(plyr)
 library(lubridate)
-library(colorspace)
 library(scales)
 library(plotly)
 library(ggplot2)
-library(tidyr)
 library(weatherData)
+library(rwunderground)
+library(jsonlite)
 knitr::opts_chunk$set(fig.height=5, fig.width=7)
 
-# Gathering the data
+```
+
+# Grabbing the Data
+
+```{r}
+
+##############################
+# Pyro Pizza Data ############
+##############################
+
 # (my_sheets <- gs_ls())
 # fin2016 = gs_title("2016 Springwater Ledger")
 pyro = gs_key("1MzRbJdaHKv9CJMPeN7Z-WQtdoGuLWAyE9gvYS-_Mgc8")
@@ -51,17 +58,144 @@ setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par",
 inventory = inventory[-1]
 inventory[,date:=mdy(date)]
 
+####################################
+# Historical Weather Data By Day ###
+####################################
+
+wu.apikey = readLines("config.io",warn=F)
+rwunderground::set_api_key(wu.apikey)
+
+getHistoricalWeather <- function(airport.code="PDX", date="20161219")
+{
+  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
+  final.url <- paste0(base.url, 'history_', date, '/q/', airport.code, '.json')
+
+  # reading in as raw lines from the web service
+  conn <- url(final.url)
+  raw.data <- readLines(conn, n=-1L, ok=TRUE)
+ # Convert to a JSON
+  weather.data <- fromJSON(paste(raw.data, collapse=""))
+  close(conn)
+  return(weather.data)
+}
+
+# get data for 10 days - restriction by Weather Underground for free usage
+date.range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-09'), by='1 day')
+
+# Initialize a data frame
+weather <- data.table()
+
+# loop over dates, and fetch weather data
+for(i in seq_along(date.range)) {
+    weather.data <- getHistoricalWeather('PDX', format(date.range[i], "%Y%m%d"))
+    weather.obs = setDT(weather.data$history$observations)
+    weather.sum = setDT(weather.data$history$dailysummary)
+    historic = data.table(Airport="PDX",
+                Date=date.range[i],
+                MaxTemp=weather.sum$maxtempi,
+                MinTemp=weather.sum$mintempi,
+                Conditions=weather.obs$conds,
+                Rain=weather.sum$rain,
+                Snow=weather.sum$snow,
+                Humidity=weather.sum$humidity,
+                Wind=weather.sum$meanwindspdi)
+    weather <- rbind(weather, historic)
+    print(i)
+}
+
+# save to CSV
+write.csv(weather, file=('PDX.csv'), row.names=FALSE)
+
+######################################
+# Historical Weather Data By Month ###
+######################################
+
+getMonthlyWeather <- function(airport="PDX", date=as.Date("2016-12-19"))
+{
+  base.url <- paste0('http://api.wunderground.com/history/airport/K',airport,'/',
+                     year(date),'/',
+                     month(date),'/',
+                     day(date),'/',
+                     'MonthlyHistory.html?format=1&_ga=2.62584876.1655856170.1504224348-429437200.1504224348')
+
+  # reading in as raw lines from the web service
+  conn <- url(base.url)
+  weather.data <- read.csv(conn)
+  # close(conn)
+  return(weather.data)
+}
+
+# get data for 10 days - restriction by Weather Underground for free usage
+date.range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-20'), by='1 month')
+
+# Initialize a data frame
+weather <- data.table()
+
+i=1
+
+# loop over months, and fetch weather data
+for(i in seq_along(date.range)) {
+    weather.data <- getMonthlyWeather('PDX', as.Date(date.range[i]))
+    monthly = data.table(Airport=rep("PDX",nrow(weather.data)),
+                Date=weather.data$PST,
+                MaxTemp=weather.data$Max.TemperatureF,
+                MinTemp=weather.data$Min.TemperatureF,
+                Conditions=weather.data$Events,
+                Rain=weather.data$PrecipitationIn,
+                Snow=weather.data$PrecipitationIn,
+                Humidity=weather.data$Mean.Humidity,
+                Wind=weather.data$Max.Wind.SpeedMPH)
+    weather <- rbind(weather, monthly)
+    print(i)
+}
+
+# save to CSV
+write.csv(weather, file=('PDX.csv'), row.names=FALSE)
+
+#############################
+# Forecast Weather Data #####
+#############################
+
+wu.apikey = readLines("config.io",warn=F)
+rwunderground::set_api_key(wu.apikey)
+
+getForecastWeather <- function(airport.code="PDX")
+{
+  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
+  final.url <- paste0(base.url, 'forecast10day/q/', airport.code, '.json')
+
+  # reading in as raw lines from the web service
+  conn <- url(final.url)
+  raw.data <- readLines(conn, n=-1L, ok=TRUE)
+ # Convert to a JSON
+  weather.data <- fromJSON(paste(raw.data, collapse=""))
+  close(conn)
+  return(weather.data)
+}
+
+weather.data <- getForecastWeather('PDX')
+weather.data = setDT(weather.data$forecast$simpleforecast$forecastday)
+forecast = data.table(Airport=rep("PDX",length()),
+                Date=seq(Sys.Date(),Sys.Date()+9,by='day'),
+                MaxTemp=weather.data$high[[1]],
+                MinTemp=weather.data$low[[1]],
+                Conditions=weather.data$conditions,
+                Rain=weather.data$qpf_allday[[1]],
+                Snow=weather.data$snow_allday[[1]],
+                Humidity=weather.data$avehumidity,
+                Wind=weather.data$avewind[[1]])
+
 ```
 
-# Pulling in the Weather Data
+# Combining Datasets
 
 ```{r}
 
-showAvailableColumns("PDX", "2016-12-19", end_date="2017-04-09")
-weather = setDT(getWeatherForDate("PDX", "2016-12-19", end_date="2017-04-09",
-                                  opt_custom_columns=TRUE, custom_columns=c(1:10)))
-weather[,date:=as.Date(as.character(Date))]
+weather$Conditions = as.factor(weather$Conditions)
+conditions = levels(weather$Conditions)
 
+write.csv(conditions,file="conditions.csv")
 
 ```
+
 
