@@ -39,7 +39,7 @@ knitr::opts_chunk$set(fig.height=5, fig.width=7)
 
 ```
 
-# Grabbing the Data
+# Grabbing the Pyro Inventory Data
 
 ```{r}
 
@@ -56,7 +56,14 @@ inventory = pyro %>% gs_read_csv(ws = "12th INVENTORY", skip=0) %>% as.data.tabl
 # fixing the dates in the 2016 data
 setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par","prep_rec","prep_actual","waste","final_inventory","short_long","scale","use_expected","use_actual","temp","precip","clouds","sun","wind","humidity","holiday","event"))
 inventory = inventory[-1]
+inventory[,c("event","temp","precip","clouds","sun","wind","humidity","holiday"):=NULL]
 inventory[,date:=mdy(date)]
+
+```
+
+# Grabbing Daily Historical Weather Data
+
+```{r}
 
 ####################################
 # Historical Weather Data By Day ###
@@ -104,7 +111,14 @@ for(i in seq_along(date.range)) {
 }
 
 # save to CSV
-write.csv(weather, file=('PDX.csv'), row.names=FALSE)
+write.csv(weather, file=('PDX-daily.csv'), row.names=FALSE)
+
+
+```
+
+# Grabbing the Monthly Historical Weather Data
+
+```{r}
 
 ######################################
 # Historical Weather Data By Month ###
@@ -136,21 +150,42 @@ i=1
 # loop over months, and fetch weather data
 for(i in seq_along(date.range)) {
     weather.data <- getMonthlyWeather('PDX', as.Date(date.range[i]))
-    monthly = data.table(Airport=rep("PDX",nrow(weather.data)),
-                Date=weather.data$PST,
-                MaxTemp=weather.data$Max.TemperatureF,
-                MinTemp=weather.data$Min.TemperatureF,
-                Conditions=weather.data$Events,
-                Rain=weather.data$PrecipitationIn,
-                Snow=weather.data$PrecipitationIn,
-                Humidity=weather.data$Mean.Humidity,
-                Wind=weather.data$Max.Wind.SpeedMPH)
+    monthly = data.table(airport=rep("PDX",nrow(weather.data)),
+                date=weather.data[,1],
+                maxTemp=weather.data$Max.TemperatureF,
+                minTemp=weather.data$Min.TemperatureF,
+                precipitation=weather.data$PrecipitationIn,
+                cloudCover=weather.data$CloudCover,
+                conditions=weather.data$Events,
+                humidity=weather.data$Mean.Humidity,
+                wind=weather.data$Max.Wind.SpeedMPH)
     weather <- rbind(weather, monthly)
     print(i)
 }
 
+weather[,date:=as.Date(date)]
+
+# filling in blank conditions based on cloudcover
+weather[conditions=="",conditions:=ifelse(cloudCover>8,"Overcast","")]
+weather[conditions=="",conditions:=ifelse(cloudCover<=8 & cloudCover>6,"Mostly Cloudly","")]
+weather[conditions=="",conditions:=ifelse(cloudCover<=6 & cloudCover>4,"Partly Cloudly","")]
+weather[conditions=="",conditions:=ifelse(cloudCover<=4 & cloudCover>2,"Scattered Clouds","")]
+weather[conditions=="",conditions:=ifelse(cloudCover<=2,"Clear","Unknown")]
+
+# correcting for trace precipitation
+weather$precipitation = as.numeric(as.character(weather$precipitation))
+weather[is.na(precipitation),precipitation:=0.001]
+weather[,snow:=ifelse(grepl("Snow",conditions) & !grepl("Rain",conditions),precipitation,0)]
+weather[,rain:=ifelse(grepl("Rain",conditions),precipitation,0)]
+
 # save to CSV
-write.csv(weather, file=('PDX.csv'), row.names=FALSE)
+write.csv(weather, file=('PDX-monthly.csv'), row.names=FALSE)
+
+```
+
+# Grabbing the 10-day Forecast Data
+
+```{r}
 
 #############################
 # Forecast Weather Data #####
@@ -175,15 +210,15 @@ getForecastWeather <- function(airport.code="PDX")
 
 weather.data <- getForecastWeather('PDX')
 weather.data = setDT(weather.data$forecast$simpleforecast$forecastday)
-forecast = data.table(Airport=rep("PDX",length()),
-                Date=seq(Sys.Date(),Sys.Date()+9,by='day'),
-                MaxTemp=weather.data$high[[1]],
-                MinTemp=weather.data$low[[1]],
-                Conditions=weather.data$conditions,
-                Rain=weather.data$qpf_allday[[1]],
-                Snow=weather.data$snow_allday[[1]],
-                Humidity=weather.data$avehumidity,
-                Wind=weather.data$avewind[[1]])
+forecast = data.table(Airport=rep("PDX",10),
+                date=seq(Sys.Date(),Sys.Date()+9,by='day'),
+                maxTemp=weather.data$high[[1]],
+                minTemp=weather.data$low[[1]],
+                conditions=weather.data$conditions,
+                rain=weather.data$qpf_allday[[1]],
+                snow=weather.data$snow_allday[[1]],
+                humidity=weather.data$avehumidity,
+                wind=weather.data$avewind[[1]])
 
 ```
 
@@ -191,10 +226,14 @@ forecast = data.table(Airport=rep("PDX",length()),
 
 ```{r}
 
-weather$Conditions = as.factor(weather$Conditions)
-conditions = levels(weather$Conditions)
+# feature extraction
+# prediction
+# shiny interface
+# add holiday dummy variable
 
-write.csv(conditions,file="conditions.csv")
+dt = merge(inventory,weather,by="date")
+
+
 
 ```
 
