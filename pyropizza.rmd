@@ -219,7 +219,7 @@ weather[,c("conditions1","conditions2","conditions3") := tstrsplit(conditions, "
 weather[,conditions:=get_weather_condition(conditions1,conditions2,conditions3),by=date]
 
 # save to CSV
-# write.csv(weather, file=('weather-09152017.csv'), row.names=FALSE)
+write.csv(weather, file=('weather-09152017.csv'), row.names=FALSE)
 
 # weather = setDT(read.csv(file="PDX-monthly.csv"))
 
@@ -357,6 +357,8 @@ ntest = test[,.(date,use_actual,use_expected,day,conditions,season,holiday,
 rfuse = randomForest(use_actual ~ day + conditions + season + holiday +
                   temp_maxz + temp_minz + humidityz + windz  + rainz +
                   use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez, data = ntrain)
+
+# save(rfuse,file="rfuse.RData")
 
 ntest[,use_predicted:=round(predict(rfuse,ntest,type="response"))]
 ntest[,.(date,day,use_actual,use_predicted,use_expected)]
