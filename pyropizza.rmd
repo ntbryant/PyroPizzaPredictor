@@ -21,6 +21,7 @@ pre {
 }
 </style>
 
+# Setup
 
 ```{r, warning=FALSE, message=FALSE, results='hide'}
 
@@ -36,6 +37,150 @@ library(weatherData)
 library(rwunderground)
 library(jsonlite)
 knitr::opts_chunk$set(fig.height=5, fig.width=7)
+library(zoo)
+library(randomForest)
+library(timeDate)
+library(caret)
+library(glmnet)
+library(gam)
+library(rvest)
+library(tidyr)
+
+```
+
+# Helper Functions
+
+```{r}
+
+get_monthly_weather <- function(airport="PDX", date=as.Date("2016-12-19")) {
+
+  url <- paste0('https://www.wunderground.com/history/airport/',airport,'/',
+                     year(date),'/',
+                     month(date),'/',
+                     day(date),'/',
+                     'MonthlyHistory.html')
+
+  page <- read_html(url)
+  
+  weather_data <- page %>%
+    html_nodes("table") %>%
+    .[[4]] %>%
+    html_table() %>%
+    as.data.table()
+  
+  setnames()
+  weather_data[,month:=month(date)]
+  weather_data[,year:=year(date)]
+}
+
+getMonthlyWeatherAirport <- function(airport="PDX", date=as.Date("2016-12-19"))
+{
+  base.url <- paste0('http://api.wunderground.com/history/airport/K',airport,'/',
+                     year(date),'/',
+                     month(date),'/',
+                     day(date),'/',
+                     'MonthlyHistory.html?format=1&_ga=2.62584876.1655856170.1504224348-429437200.1504224348')
+
+  # reading in as raw lines from the web service
+  conn <- url(base.url)
+  weather.data <- read.csv(conn)
+  # close(conn)
+  return(weather.data)
+}
+
+# https://www.wunderground.com/history/airport/KPDX/2016/12/19/MonthlyHistory.html
+
+# https://www.wunderground.com/history/airport/KSAN/2012/10/1/MonthlyHistory.html?format=1&_ga=2.98309215.1777855846.1505430458-429437200.1504224348
+
+getMonthlyWeatherPWS <- function(pws="KORPORTL439", date=as.Date("2016-12-19"))
+{
+  base.url <- paste0('https://www.wunderground.com/weatherstation/WXDailyHistory.asp?ID=',pws,'/',
+                     "&graphspan=month&month=",month(date),
+                     "&day=",day(date),
+                     "&year=",year(date),
+                     "&format=1&_ga=2.98309215.1777855846.1505430458-429437200.1504224348")
+
+  # reading in as raw lines from the web service
+  conn <- url(base.url)
+  weather.data <- read.csv(conn)
+  # close(conn)
+  return(weather.data)
+}
+
+# https://www.wunderground.com/weatherstation/WXDailyHistory.asp?ID=KCASANTE9&graphspan=month&month=10&day=1&year=2012&format=1&_ga=2.98309215.1777855846.1505430458-429437200.1504224348
+
+getHistoricalWeather <- function(airport.code="PDX", date="20161219")
+{
+  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
+  final.url <- paste0(base.url, 'history_', date, '/q/', airport.code, '.json')
+
+  # reading in as raw lines from the web service
+  conn <- url(final.url)
+  raw.data <- readLines(conn, n=-1L, ok=TRUE)
+ # Convert to a JSON
+  weather.data <- fromJSON(paste(raw.data, collapse=""))
+  close(conn)
+  return(weather.data)
+}
+
+getForecastWeather <- function(airport.code="PDX")
+{
+  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
+  final.url <- paste0(base.url, 'forecast10day/q/', airport.code, '.json')
+
+  # reading in as raw lines from the web service
+  conn <- url(final.url)
+  raw.data <- readLines(conn, n=-1L, ok=TRUE)
+ # Convert to a JSON
+  weather.data <- fromJSON(paste(raw.data, collapse=""))
+  close(conn)
+  return(weather.data)
+}
+
+getSeason = function(dates) {
+    WS = as.Date("2012-12-15", format = "%Y-%m-%d") # Winter Solstice
+    SE = as.Date("2012-3-15",  format = "%Y-%m-%d") # Spring Equinox
+    SS = as.Date("2012-6-15",  format = "%Y-%m-%d") # Summer Solstice
+    FE = as.Date("2012-9-15",  format = "%Y-%m-%d") # Fall Equinox
+
+    # Convert dates from any year to 2012 dates
+    d = as.Date(strftime(dates, format="2012-%m-%d"))
+
+    ifelse (d >= WS | d < SE, "Winter",
+      ifelse (d >= SE & d < SS, "Spring",
+        ifelse (d >= SS & d < FE, "Summer", "Fall")))
+}
+
+getHoliday = function(holidays=listHolidays("US"),dates) {
+
+   years = year(dates)
+   years_levels = levels(as.factor(years))
+   
+   holiday_date = data.table()
+   
+   for (h in holidays) {
+      for (y in years_levels) {
+         y = as.list(as.numeric(y))
+         holiday_date = rbind(holiday_date,do.call(h,y))
+      }
+   }
+   
+   holiday_date = as.Date(holiday_date$`GMT:x`)
+   
+   holiday = ifelse(dates %in% holiday_date,1,0)
+}
+
+getWeatherCondition = function(conditions1,conditions2,conditions3) {
+   
+   if (!is.na(conditions2) & !is.na(conditions3)) {
+      c = sample(c(conditions1,conditions2,conditions3),1)
+   } else if (!is.na(conditions2)) {
+      c = sample(c(conditions1,conditions2),1)
+   } else {
+      c = conditions1
+   }
+   return(c)
+}
 
 ```
 
@@ -58,60 +203,71 @@ setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par",
 inventory = inventory[-1]
 inventory[,c("event","temp","precip","clouds","sun","wind","humidity","holiday"):=NULL]
 inventory[,date:=mdy(date)]
+inventory[,use_actual:=as.double(use_actual)]
+inventory = inventory[use_actual!=0]
 
 ```
+
+# Grabbing the Historical Weather Data
+
+```{r}
+
+getWeatherForDate("PDX", "2016-12-19", end_date="2017-04-20")
+
+dfw_wx <- getWeatherForYear("PDX", 2016)
+
+checkDataAvailabilityForDateRange("SFO", "2010-10-29", "2013-01-12")
+
+```
+
 
 # Grabbing Daily Historical Weather Data
 
 ```{r}
 
-####################################
-# Historical Weather Data By Day ###
-####################################
-
-wu.apikey = readLines("config.io",warn=F)
-rwunderground::set_api_key(wu.apikey)
-
-getHistoricalWeather <- function(airport.code="PDX", date="20161219")
-{
-  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
-  final.url <- paste0(base.url, 'history_', date, '/q/', airport.code, '.json')
-
-  # reading in as raw lines from the web service
-  conn <- url(final.url)
-  raw.data <- readLines(conn, n=-1L, ok=TRUE)
- # Convert to a JSON
-  weather.data <- fromJSON(paste(raw.data, collapse=""))
-  close(conn)
-  return(weather.data)
-}
-
-# get data for 10 days - restriction by Weather Underground for free usage
-date.range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-09'), by='1 day')
-
-# Initialize a data frame
-weather <- data.table()
-
-# loop over dates, and fetch weather data
-for(i in seq_along(date.range)) {
-    weather.data <- getHistoricalWeather('PDX', format(date.range[i], "%Y%m%d"))
-    weather.obs = setDT(weather.data$history$observations)
-    weather.sum = setDT(weather.data$history$dailysummary)
-    historic = data.table(Airport="PDX",
-                Date=date.range[i],
-                MaxTemp=weather.sum$maxtempi,
-                MinTemp=weather.sum$mintempi,
-                Conditions=weather.obs$conds,
-                Rain=weather.sum$rain,
-                Snow=weather.sum$snow,
-                Humidity=weather.sum$humidity,
-                Wind=weather.sum$meanwindspdi)
-    weather <- rbind(weather, historic)
-    print(i)
-}
-
-# save to CSV
-write.csv(weather, file=('PDX-daily.csv'), row.names=FALSE)
+# wu.apikey = readLines("config.io",warn=F)
+# rwunderground::set_api_key(wu.apikey)
+# 
+# getHistoricalWeather <- function(airport.code="PDX", date="20161219")
+# {
+#   base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
+#   final.url <- paste0(base.url, 'history_', date, '/q/', airport.code, '.json')
+# 
+#   # reading in as raw lines from the web service
+#   conn <- url(final.url)
+#   raw.data <- readLines(conn, n=-1L, ok=TRUE)
+#  # Convert to a JSON
+#   weather.data <- fromJSON(paste(raw.data, collapse=""))
+#   close(conn)
+#   return(weather.data)
+# }
+# 
+# # get data for 10 days - restriction by Weather Underground for free usage
+# date.range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-09'), by='1 day')
+# 
+# # Initialize a data frame
+# weather <- data.table()
+# 
+# # loop over dates, and fetch weather data
+# for(i in seq_along(date.range)) {
+#     weather.data <- getHistoricalWeather('PDX', format(date.range[i], "%Y%m%d"))
+#     weather.obs = setDT(weather.data$history$observations)
+#     weather.sum = setDT(weather.data$history$dailysummary)
+#     historic = data.table(Airport="PDX",
+#                 Date=date.range[i],
+#                 MaxTemp=weather.sum$maxtempi,
+#                 MinTemp=weather.sum$mintempi,
+#                 Conditions=weather.obs$conds,
+#                 Rain=weather.sum$rain,
+#                 Snow=weather.sum$snow,
+#                 Humidity=weather.sum$humidity,
+#                 Wind=weather.sum$meanwindspdi)
+#     weather <- rbind(weather, historic)
+#     print(i)
+# }
+# 
+# # save to CSV
+# write.csv(weather, file=('PDX-daily.csv'), row.names=FALSE)
 
 
 ```
@@ -120,26 +276,6 @@ write.csv(weather, file=('PDX-daily.csv'), row.names=FALSE)
 
 ```{r}
 
-######################################
-# Historical Weather Data By Month ###
-######################################
-
-getMonthlyWeather <- function(airport="PDX", date=as.Date("2016-12-19"))
-{
-  base.url <- paste0('http://api.wunderground.com/history/airport/K',airport,'/',
-                     year(date),'/',
-                     month(date),'/',
-                     day(date),'/',
-                     'MonthlyHistory.html?format=1&_ga=2.62584876.1655856170.1504224348-429437200.1504224348')
-
-  # reading in as raw lines from the web service
-  conn <- url(base.url)
-  weather.data <- read.csv(conn)
-  # close(conn)
-  return(weather.data)
-}
-
-# get data for 10 days - restriction by Weather Underground for free usage
 date.range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-20'), by='1 month')
 
 # Initialize a data frame
@@ -149,7 +285,7 @@ i=1
 
 # loop over months, and fetch weather data
 for(i in seq_along(date.range)) {
-    weather.data <- getMonthlyWeather('PDX', as.Date(date.range[i]))
+    weather.data <- getMonthlyWeatherPWS('KORPORTL542', as.Date(date.range[i]))
     monthly = data.table(airport=rep("PDX",nrow(weather.data)),
                 date=weather.data[,1],
                 maxTemp=weather.data$Max.TemperatureF,
@@ -178,8 +314,16 @@ weather[is.na(precipitation),precipitation:=0.001]
 weather[,snow:=ifelse(grepl("Snow",conditions) & !grepl("Rain",conditions),precipitation,0)]
 weather[,rain:=ifelse(grepl("Rain",conditions),precipitation,0)]
 
+# spreading out conditions
+weather$conditions = as.character(weather$conditions)
+weather[,c("conditions1", "conditions2","conditions3") := tstrsplit(conditions, "-", fixed=TRUE)]
+weather[,conditions:=sample(c(conditions1,conditions2,conditions3),1)]
+weather[,conditions:=getWeatherCondition(conditions1,conditions2,conditions3),by=date]
+
 # save to CSV
-write.csv(weather, file=('PDX-monthly.csv'), row.names=FALSE)
+# write.csv(weather, file=('PDX-monthly.csv'), row.names=FALSE)
+
+# weather = setDT(read.csv(file="PDX-monthly.csv"))
 
 ```
 
@@ -187,26 +331,8 @@ write.csv(weather, file=('PDX-monthly.csv'), row.names=FALSE)
 
 ```{r}
 
-#############################
-# Forecast Weather Data #####
-#############################
-
 wu.apikey = readLines("config.io",warn=F)
 rwunderground::set_api_key(wu.apikey)
-
-getForecastWeather <- function(airport.code="PDX")
-{
-  base.url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
-  final.url <- paste0(base.url, 'forecast10day/q/', airport.code, '.json')
-
-  # reading in as raw lines from the web service
-  conn <- url(final.url)
-  raw.data <- readLines(conn, n=-1L, ok=TRUE)
- # Convert to a JSON
-  weather.data <- fromJSON(paste(raw.data, collapse=""))
-  close(conn)
-  return(weather.data)
-}
 
 weather.data <- getForecastWeather('PDX')
 weather.data = setDT(weather.data$forecast$simpleforecast$forecastday)
@@ -222,19 +348,197 @@ forecast = data.table(Airport=rep("PDX",10),
 
 ```
 
-# Combining Datasets
+# Creating the Features
 
 ```{r}
 
-# feature extraction
-# prediction
-# shiny interface
-# add holiday dummy variable
-
+# merging inventory and weather
 dt = merge(inventory,weather,by="date")
 
+# adding seasons
+dt[,season:=getSeason(date)]
+
+# adding holidays
+dt[,holiday:=getHoliday(listHolidays("US"),date)]
+
+# adding day of the week
+dt[,day:=weekdays(date)]
+
+# creating average use compared to previous 7 days, 3 days, 1 day
+dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)) , FUN=mean, fill="extend"),
+          use3=rollapply(use_actual, width=list(-(3:1)) , FUN=mean, fill="extend"),
+          use1=rollapply(use_actual, width=list(-(1:1)) , FUN=mean, fill="extend"))]
+
+# partitioning the data
+# set.seed(111)
+inTrain = createDataPartition(dt$conditions, p=0.50)
+
+train = dt[inTrain$Resample1,]
+test = dt[-inTrain$Resample1,]
+
+# adding average use for day of week by season
+train[,':=' (avgUse=mean(use_actual),
+             medUse=median(use_actual),
+             quart1Use=quantile(use_actual)[2],
+             quart3Use=quantile(use_actual)[4],
+             maxUse=max(use_actual)),
+      by=day]
+
+test[,':=' (avgUse=mean(use_actual),
+             medUse=median(use_actual),
+             quart1Use=quantile(use_actual)[2],
+             quart3Use=quantile(use_actual)[4],
+             maxUse=max(use_actual)),
+      by=day]
+
+# center and scale all numerical features
+train[,':=' (maxTempz=scale(maxTemp),
+           minTempz=scale(minTemp),
+           humidityz=scale(humidity),
+           windz=scale(wind),
+           snowz=scale(snow),
+           rainz=scale(rain),
+           use7z=scale(use7),
+           use3z=scale(use3),
+           use1z=scale(use1),
+           avgUsez=scale(avgUse),
+           medUsez=scale(medUse),
+           quart1Usez=scale(quart1Use),
+           quart3Usez=scale(quart3Use),
+           maxUsez=scale(maxUse))]
+test[,':=' (maxTempz=scale(maxTemp),
+           minTempz=scale(minTemp),
+           humidityz=scale(humidity),
+           windz=scale(wind),
+           snowz=scale(snow),
+           rainz=scale(rain),
+           use7z=scale(use7),
+           use3z=scale(use3),
+           use1z=scale(use1),
+           avgUsez=scale(avgUse),
+           medUsez=scale(medUse),
+           quart1Usez=scale(quart1Use),
+           quart3Usez=scale(quart3Use),
+           maxUsez=scale(maxUse))]
+
+# making the categorical variables factors
+train$day = as.factor(train$day)
+train$season = as.factor(train$season)
+train$conditions = as.factor(train$conditions)
+test$day = as.factor(test$day)
+test$season = as.factor(test$season)
+test$conditions = as.factor(test$conditions)
+
+```
+
+# Fitting a Random Forest Model
+
+```{r rforest}
+
+# haven't fixed snowz
+
+# preping for fit
+ntrain = train[,.(use_actual,day,conditions,season,holiday,
+                  maxTempz,minTempz,humidityz,windz,rainz,snowz,
+                  use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
+ntest = test[,.(date,use_actual,use_expected,day,conditions,season,holiday,
+                  maxTempz,minTempz,humidityz,windz,rainz,snowz,
+                  use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
+
+rfuse = randomForest(use_actual ~ day + conditions + season + holiday +
+                  maxTempz + minTempz + humidityz + windz  + rainz +
+                  use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez, data = ntrain)
+
+ntest[,use_predicted:=round(predict(rfuse,ntest,type="response"))]
+ntest[,.(date,day,use_actual,use_predicted,use_expected)]
+
+imp = importance(rfuse)
+MAE = mean(abs(ntest$use_actual-ntest$use_predicted))
+MAE_baseline = mean(abs(ntest$use_actual-ntest$use_expected))
+
+R2 <- 1 - (sum((ntest$use_actual-ntest$use_predicted)^2)/sum((ntest$use_actual-mean(ntest$use_actual))^2))
+R2_baseline <- 1 - (sum((ntest$use_actual-ntest$use_expected)^2)/sum((ntest$use_actual-mean(ntest$use_actual))^2))
+
+ggplot(ntest,aes(x=ntest$use_actual)) + 
+   geom_point(aes(y=ntest$use_predicted),color="red") +
+   geom_point(aes(y=ntest$use_expected),color="blue") +
+   geom_abline(slope = 1,intercept = 0)
+   
+# # estimating the concordance correlation coefficient (CCC)
+# mtestFeces = melt(ntest,id.vars=c("Toilet","Date"),
+#             measure.vars = c("Feces","pFeces"),
+#             variable.name = "Method",
+#             value.name = "Weight")
+# mtestFeces = na.omit(mtestFeces)
+# mtestFeces.vc = ccclon(dataset = mtestFeces, ry = "Weight", rind = "Toilet", rtime = "Date", rmet = "Method",rho=0)
+# summary(mtestFeces.vc)
+
+```
+
+# Fitting a Generalized Linear Model
+
+```{r}
+
+# preping for fit
+ntrain = train[,.(use_actual,day,conditions,season,holiday,
+                  maxTempz,minTempz,humidityz,windz,snowz,rainz,use7z,use3z,use1z)]
+ntest = test[,.(use_actual,use_expected,day,conditions,season,holiday,
+                  maxTempz,minTempz,humidityz,windz,snowz,rainz,use7z,use3z,use1z)]
+ntrain$day = as.factor(ntrain$day)
+ntrain$season = as.factor(ntrain$season)
+ntest$day = as.factor(ntest$day)
+ntest$season = as.factor(ntest$season)
+
+glmUse = gam(y = ntrain[,.(use_actual)],
+                x = ntrain[,.(day,conditions,season,holiday,
+                             maxTempz,minTempz,humidityz,windz,snowz,rainz,use7z,use3z,use1z)],
+                family="gaussian")
+
+rfuse = gam(use_actual ~ day + holiday + season + conditions +
+                        maxTempz + minTempz + humidityz + windz + snowz + rainz + use7z + use3z + use1z, data = ntrain)
+
+ntest[,pUse:=round(predict(rfuse,ntest,type="response"))]
+
+imp = importance(rfuse)
+MAE = mean(abs(ntest$use_actual-ntest$pUse))
+MAE = mean(abs(ntest$use_actual-ntest$use_expected))
+
+ggplot(ntest,aes(x=ntest$use_actual)) + 
+   geom_point(aes(y=ntest$pUse),color="red") +
+   geom_point(aes(y=ntest$use_expected),color="blue") +
+   geom_abline(slope = 1,intercept = 0)
+   
+# estimating the concordance correlation coefficient (CCC)
+mtestFeces = melt(ntest,id.vars=c("Toilet","Date"),
+            measure.vars = c("Feces","pFeces"),
+            variable.name = "Method",
+            value.name = "Weight")
+mtestFeces = na.omit(mtestFeces)
+mtestFeces.vc = ccclon(dataset = mtestFeces, ry = "Weight", rind = "Toilet", rtime = "Date", rmet = "Method",rho=0)
+summary(mtestFeces.vc)
 
 
 ```
 
+# Amount to Prep
+
+```{r}
+
+# creating overflow estimates
+dt[,':=' (Date0 = Date - 1,
+           Feces0 = .SD[match(Date - 1,.SD[,Date]),Feces],
+           Urine0 = .SD[match(Date - 1,.SD[,Date]),Urine],
+           Date2 = Date + 1,
+           Feces2 = .SD[match(Date + 1,.SD[,Date]),Feces],
+           Urine2 = .SD[match(Date + 1,.SD[,Date]),Urine],
+           NormFeces2 = .SD[match(Date + 1,.SD[,Date]),NormFeces],
+           NormUrine2 = .SD[match(Date + 1,.SD[,Date]),NormUrine],
+           Date3 = Date + 2,
+           Feces3 = .SD[match(Date + 2,.SD[,Date]),Feces],
+           Urine3 = .SD[match(Date + 2,.SD[,Date]),Urine],
+           NormFeces3 = .SD[match(Date + 2,.SD[,Date]),NormFeces],
+           NormUrine3 = .SD[match(Date + 2,.SD[,Date]),NormUrine]),
+    by=Toilet]
+
+```
 
