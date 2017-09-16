@@ -1,20 +1,24 @@
 
 library(rhandsontable)
 library(shiny)
+library(lubridate)
 
 editTable <- function(DF, outdir=getwd(), outfilename="table"){
   ui <- shinyUI(fluidPage(
     
-    titlePanel("Edit and save a table"),
+    titlePanel("Pyro Pizza Dough Predictor"),
     sidebarLayout(
       sidebarPanel(
-        helpText("Shiny app based on an example given in the rhandsontable package.", 
-                 "Right-click on the table to delete/insert rows.", 
-                 "Double-click on a cell to edit"),
+        helpText(paste0("Enter the current dough inventory for ",
+                 wday(Sys.Date(),label=TRUE,abbr=FALSE),", ",
+                 month(Sys.Date(),label=TRUE,abbr=FALSE)," ",
+                 day(Sys.Date()),", ",
+                 year(Sys.Date()))),
         
         wellPanel(
-          h3("Table options"),
-          radioButtons("useType", "Use Data Types", c("TRUE", "FALSE"))
+          h3("Current Inventory"),
+          numericInput("inventory",NULL,300,min=0,max=600),
+          submitButton("Submit")
         ),
         br(), 
         
@@ -53,7 +57,7 @@ editTable <- function(DF, outdir=getwd(), outfilename="table"){
     output$hot <- renderRHandsontable({
       DF <- values[["DF"]]
       if (!is.null(DF))
-        rhandsontable(DF, useTypes = as.logical(input$useType), stretchH = "all")
+        rhandsontable(DF, stretchH = "all")
     })
     
     ## Save 
@@ -70,6 +74,7 @@ editTable <- function(DF, outdir=getwd(), outfilename="table"){
   return(invisible())
 }
 
-DF <- data.frame(Value = 1:10, Status = TRUE, Name = LETTERS[1:10],
-                 Date = seq(from = Sys.Date(), by = "days", length.out = 10),
-                 stringsAsFactors = FALSE)
+dt[order(-date)]
+
+
+editTable(dt)

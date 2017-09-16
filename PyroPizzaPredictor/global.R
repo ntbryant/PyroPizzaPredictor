@@ -142,7 +142,7 @@ dt[,':=' (avgUse=mean(use_actual),
              quart1Use=quantile(use_actual)[2],
              quart3Use=quantile(use_actual)[4],
              maxUse=max(use_actual)),
-      by=day]
+      by=.(day,season)]
 
 # center and scale all numerical features
 dt[,':=' (temp_maxz=scale(temp_max),

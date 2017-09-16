@@ -272,6 +272,10 @@ dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)) , FUN=mean, fill="extend
           use3=rollapply(use_actual, width=list(-(3:1)) , FUN=mean, fill="extend"),
           use1=rollapply(use_actual, width=list(-(1:1)) , FUN=mean, fill="extend"))]
 
+# eliminating single condition instances
+table(dt$conditions)
+dt = dt[conditions!="Thunderstorm"]
+
 # partitioning the data
 set.seed(111)
 inTrain = createDataPartition(dt$conditions, p=0.50)
@@ -361,7 +365,7 @@ rfuse = randomForest(use_actual ~ day + conditions + season + holiday +
 # save(rfuse,file="rfuse.RData")
 
 ntest[,use_predicted:=round(predict(rfuse,ntest,type="response"))]
-ntest[,.(date,day,use_actual,use_predicted,use_expected)]
+# ntest[,.(date,day,use_actual,use_predicted,use_expected)]
 
 imp = importance(rfuse)
 MAE = mean(abs(ntest$use_actual-ntest$use_predicted))
