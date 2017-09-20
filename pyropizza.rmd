@@ -198,9 +198,9 @@ weather[,conditions:=gsub("\t","",conditions)]
 # filling in blank conditions based on average visibility
 weather[conditions=="",conditions:=ifelse(visibility_avg>8,"Overcast","")]
 weather[conditions=="",conditions:=
-          ifelse(visibility_avg<=8 & visibility_avg>6,"Mostly Cloudly","")]
+          ifelse(visibility_avg<=8 & visibility_avg>6,"Mostly Cloudy","")]
 weather[conditions=="",conditions:=
-          ifelse(visibility_avg<=6 & visibility_avg>4,"Partly Cloudly","")]
+          ifelse(visibility_avg<=6 & visibility_avg>4,"Partly Cloudy","")]
 weather[conditions=="",conditions:=
           ifelse(visibility_avg<=4 & visibility_avg>2,"Scattered Clouds","")]
 weather[conditions=="",conditions:=
@@ -219,7 +219,7 @@ weather[,c("conditions1","conditions2","conditions3") := tstrsplit(conditions, "
 weather[,conditions:=get_weather_condition(conditions1,conditions2,conditions3),by=date]
 
 # save to CSV
-write.csv(weather, file=('weather-09152017.csv'), row.names=FALSE)
+# write.csv(weather, file=('weather-09152017.csv'), row.names=FALSE)
 
 # weather = setDT(read.csv(file="PDX-monthly.csv"))
 
@@ -274,7 +274,6 @@ dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)) , FUN=mean, fill="extend
 
 # eliminating single condition instances
 table(dt$conditions)
-dt = dt[conditions!="Thunderstorm"]
 
 # partitioning the data
 set.seed(111)
@@ -283,7 +282,7 @@ inTrain = createDataPartition(dt$conditions, p=0.50)
 train = dt[inTrain$Resample1,]
 test = dt[-inTrain$Resample1,]
 
-# train = copy(dt)
+train = copy(dt)
 
 # adding average use for day of week by season
 train[,':=' (avgUse=mean(use_actual),
@@ -344,7 +343,7 @@ test$conditions = as.factor(test$conditions)
 
 ```{r rforest}
 
-# haven't fixed snowz
+# haven't fixed snowz and removing seasons and conditions
 
 ntrain = train[,.(use_actual,day,conditions,season,holiday,
                   temp_maxz,temp_minz,humidityz,windz,rainz,snowz,
@@ -358,11 +357,11 @@ ntest = test[,.(date,use_actual,use_expected,day,conditions,season,holiday,
                   temp_maxz,temp_minz,humidityz,windz,rainz,snowz,
                   use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
 
-rfuse = randomForest(use_actual ~ day + conditions + season + holiday +
+rfuse = randomForest(use_actual ~ day + holiday +
                   temp_maxz + temp_minz + humidityz + windz  + rainz +
                   use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez, data = ntrain)
 
-# save(rfuse,file="rfuse.RData")
+save(rfuse,file="rfuse.RData")
 
 ntest[,use_predicted:=round(predict(rfuse,ntest,type="response"))]
 # ntest[,.(date,day,use_actual,use_predicted,use_expected)]

@@ -2,6 +2,7 @@
 library(rhandsontable)
 library(shiny)
 library(lubridate)
+library(tidyr)
 
 editTable <- function(DF, outdir=getwd(), outfilename="table"){
   ui <- shinyUI(fluidPage(
@@ -10,8 +11,8 @@ editTable <- function(DF, outdir=getwd(), outfilename="table"){
     sidebarLayout(
       sidebarPanel(
         helpText(paste0("Enter the current dough inventory for ",
-                 wday(Sys.Date(),label=TRUE,abbr=FALSE),", ",
-                 month(Sys.Date(),label=TRUE,abbr=FALSE)," ",
+                 lubridate::wday(Sys.Date(),label=TRUE,abbr=FALSE),", ",
+                 lubridate::month(Sys.Date(),label=TRUE,abbr=FALSE)," ",
                  day(Sys.Date()),", ",
                  year(Sys.Date()))),
         
