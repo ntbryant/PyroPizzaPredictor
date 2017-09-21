@@ -10,7 +10,7 @@ ui <- dashboardPage(
     sidebarMenu(
       menuItem("Dashboard", tabName = "dashboard", icon = icon("dashboard")),
       menuItem("Spreadsheet", tabName = "spreadsheet", icon = icon("th")),
-      menuItem(actionButton("save","Save Table"))
+      menuItem(actionButton("save","Save Spreadsheet"))
     )
   ),
   
@@ -24,7 +24,7 @@ ui <- dashboardPage(
                   title = "Enter Inventory",
                   solidHeader = TRUE,
                   status = "success",
-                  helpText(HTML(paste("Enter the current dough inventory for",
+                  helpText(HTML(paste0("Enter the current dough inventory for",
                                       "<br>",
                                   lubridate::wday(Sys.Date(),
                                                   label=TRUE,
@@ -35,21 +35,51 @@ ui <- dashboardPage(
                                   day(Sys.Date()),", ",
                                   year(Sys.Date())))),
                   
-                  wellPanel(
-                    numericInput("inventory",NULL,300,min=0,max=600),
-                    actionButton("submit" ,"Submit")
-                  )
+                  
+                  numericInput("inventory",NULL,value=NA),
+                  actionButton("submitInventory" ,"Submit")
                 ),
                 valueBoxOutput("bigaBox")
               ),
               
               fluidRow(
                 box(
-                  title = "Weather Forecast",
+                  title = "Recommended Prep for Today",
                   solidHeader = TRUE,
-                  status = "warning",
-                  htmlOutput("frame"))
+                  status = "danger",
+                  helpText(HTML(paste0("Expected use for next ",
+                                      lubridate::wday((Sys.Date()+4),
+                                                      label=TRUE,
+                                                      abbr=FALSE)," is ",
+                                      dt[date==(Sys.Date()+4),use_predicted],
+                                      " pizzas. Given current inventory and the expected use of ",
+                                      dt[date==Sys.Date(),par],
+                                      " doughs over the next four days, recommended prep
+                                      for today is:"))),
+                  h1(textOutput("expected_use"), align = "center")
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "Actual Prep and Waste",
+                  solidHeader = TRUE,
+                  status = "success",
+                  helpText("Amount prepped: "),
+                  numericInput("prep_actual",NULL,value=NA),
+                  helpText("Amount wasted: "),
+                  numericInput("waste",NULL,value=NA),
+                  actionButton("submitPrep" ,"Submit")
+                )
               )
+              
+              # fluidRow(
+              #   box(
+              #     title = "Weather Forecast",
+              #     solidHeader = TRUE,
+              #     status = "warning",
+              #     htmlOutput("frame"))
+              # )
       ),
       
       # Spreadsheet

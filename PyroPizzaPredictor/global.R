@@ -92,6 +92,11 @@ inventory[,c("event","temp","precip","clouds","sun","wind","humidity","holiday")
 inventory[,date:=mdy(date)]
 inventory[,use_actual:=as.double(use_actual)]
 inventory[,initial_inventory:=as.double(initial_inventory)]
+inventory[,par:=as.double(par)]
+inventory[,prep_rec:=as.double(prep_rec)]
+inventory[,prep_actual:=as.double(prep_actual)]
+inventory[,waste:=as.double(waste)]
+inventory[,final_inventory:=as.double(final_inventory)]
 inventory = inventory[use_actual!=0]
 
 ##############################
@@ -138,21 +143,6 @@ table(weather$conditions)
 # merging inventory and weather
 dt = merge(inventory,weather,by="date",all.y=TRUE)
 
-#####################################
-# Delete this section after adding actual data
-#######################################
-
-# adding in dummy use_actual until all the data is available
-dt[is.na(use_actual),use_actual:=as.double(sample(100:600,1)),by=date]
-
-# # eliminating conditions not in the training data
-# training_conditions = c("Fog","Overcast","Rain","Snow")
-# dt = dt[conditions %in% training_conditions]
-# table(dt$conditions)
-# dt$conditions = as.character(dt$conditions)
-
-#############################################
-
 # adding seasons
 dt[,season:=get_season(date)]
 
@@ -162,10 +152,39 @@ dt[,holiday:=get_holiday(listHolidays("US"),date)]
 # adding day of the week
 dt[,day:=weekdays(date)]
 
+#####################################
+# Delete this section after adding actual data
+#######################################
+
+# adding in dummy use_actual until all the data is available
+dt[is.na(use_actual) & date<Sys.Date(),use_actual:=
+     as.double(sample(100:600,1)),by=date]
+
+#########################################
+
 # creating average use compared to previous 7 days, 3 days, 1 day
 dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)), FUN=mean, fill="extend", na.rm=T),
           use3=rollapply(use_actual, width=list(-(3:1)), FUN=mean, fill="extend", na.rm=T),
           use1=rollapply(use_actual, width=list(-(1:1)), FUN=mean, fill="extend", na.rm=T))]
+
+# creating use 3 and use 1 for forecast data
+dt[,use3:=ifelse(is.na(use3),.SD[match(date - 7,.SD[,date]),use3],use3)]
+dt[,use1:=ifelse(is.na(use1),.SD[match(date - 7,.SD[,date]),use1],use1)]
+
+#####################################
+# Delete this section after adding actual data
+#######################################
+
+dt[is.na(use3),use3:=sample(dt[!is.na(use3),use3],1),by=date]
+dt[is.na(use1),use1:=sample(dt[!is.na(use1),use1],1),by=date]
+
+# # eliminating conditions not in the training data
+# training_conditions = c("Fog","Overcast","Rain","Snow")
+# dt = dt[conditions %in% training_conditions]
+# table(dt$conditions)
+# dt$conditions = as.character(dt$conditions)
+
+#############################################
 
 # adding average use for day of week by season
 dt[,':=' (avgUse=mean(use_actual, na.rm=T),
@@ -205,6 +224,14 @@ load(file="./../rfuse.RData")
 
 dt[,use_predicted:=round(predict(rfuse,dt,type="response"))]
 dt[order(-date)]
+
+dt[,par:=ifelse(is.na(par),rollapply(use_predicted,
+                             width=4,
+                             align="right",
+                             FUN=sum,
+                             fill="extend",
+                             na.rm=T),
+                par)]
 
 # importance(rfuse)
 # MAE = mean(abs(dt$use_actual-dt$use_predicted))
