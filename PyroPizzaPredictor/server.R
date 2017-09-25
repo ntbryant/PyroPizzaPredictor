@@ -2,7 +2,7 @@
 library(shiny)
 library(shinydashboard)
 library(ggplot2)
-library(data.table)
+library(dtplyr)
 
 shinyServer(function(input, output) {
   

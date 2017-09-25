@@ -2,7 +2,7 @@
 library(shiny)
 library(shinydashboard)
 library(rhandsontable)
-library(dplyr)
+library(dtplyr)
 
 ui <- dashboardPage(
   dashboardHeader(title = "Pyro Pizza Dough Predictor"),

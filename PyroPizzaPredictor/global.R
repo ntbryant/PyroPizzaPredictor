@@ -1,9 +1,7 @@
 
 # Setup
 library(googlesheets)
-library(data.table)
 library(dplyr)
-library(plyr)
 library(lubridate)
 library(zoo)
 library(randomForest)
@@ -13,7 +11,7 @@ library(tidyr)
 library(jsonlite)
 library(shiny)
 library(ggplot2)
-library(dplyr)
+library(data.table)
 
 # Helper Functions
 get_weather_forecast <- function(airport="PDX")
@@ -103,7 +101,7 @@ inventory = inventory[use_actual!=0]
 # Forecast Data ############
 ##############################
 
-wu.apikey = readLines("./../config.io",warn=F)
+wu.apikey = readLines("config.io",warn=F)
 rwunderground::set_api_key(wu.apikey)
 
 weather_data <- get_weather_forecast('PDX')
@@ -123,8 +121,9 @@ forecast[,temp_min:=as.numeric(temp_min)]
 # getting rid of "Chance of a "
 gsub("Chance of a ","",forecast$conditions)
 
-weather = setDT(read.csv(file="./../weather-09152017.csv"))
+weather = setDT(read.csv(file="weather-09152017.csv"))
 weather[,date:=as.Date(date)]
+
 # reducing to the forecast variables
 names = colnames(weather)
 keep = c("date","temp_max","temp_min","conditions","rain","snow","humidity","wind")
@@ -220,7 +219,7 @@ dt$conditions = as.factor(dt$conditions)
 # Predictor ############
 ##############################
 
-load(file="./../rfuse.RData")
+load(file="rfuse.RData")
 
 dt[,use_predicted:=round(predict(rfuse,dt,type="response"))]
 dt[order(-date)]
