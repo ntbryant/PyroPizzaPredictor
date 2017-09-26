@@ -159,19 +159,22 @@ get_weather_condition = function(conditions1,conditions2,conditions3) {
 # Pyro Pizza Data ############
 ##############################
 
-# (my_sheets <- gs_ls())
-# fin2016 = gs_title("2016 Springwater Ledger")
-pyro = gs_key("1MzRbJdaHKv9CJMPeN7Z-WQtdoGuLWAyE9gvYS-_Mgc8")
-# gs_ws_ls(fin2016)
-inventory = pyro %>% gs_read_csv(ws = "12th INVENTORY", skip=0) %>% as.data.table
+# # (my_sheets <- gs_ls())
+# # fin2016 = gs_title("2016 Springwater Ledger")
+# pyro = gs_key("1MzRbJdaHKv9CJMPeN7Z-WQtdoGuLWAyE9gvYS-_Mgc8")
+# # gs_ws_ls(fin2016)
+# inventory = pyro %>% gs_read_csv(ws = "12th INVENTORY", skip=0) %>% as.data.table
+
+inventory = setDT(read.csv("inventory.csv"))
 
 # fixing the dates in the 2016 data
-setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par","prep_rec","prep_actual","waste","final_inventory","short_long","scale","use_expected","use_actual","temp","precip","clouds","sun","wind","humidity","holiday","event"))
-inventory = inventory[-1]
-inventory[,c("event","temp","precip","clouds","sun","wind","humidity","holiday"):=NULL]
+setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par","prep_rec","prep_actual","waste","final_inventory","short_long","scale","use_expected","use_actual"))
+# ,"temp","precip","clouds","sun","wind","humidity","holiday","event"))
+# inventory = inventory[-1]
+# inventory[,c("event","temp","precip","clouds","sun","wind","humidity","holiday"):=NULL]
 inventory[,date:=mdy(date)]
 inventory[,use_actual:=as.double(use_actual)]
-inventory = inventory[use_actual!=0]
+# inventory = inventory[use_actual!=0]
 
 ```
 
@@ -179,7 +182,7 @@ inventory = inventory[use_actual!=0]
 
 ```{r}
 
-date_range <- seq.Date(from=as.Date('2016-12-19'), to=as.Date('2017-04-20'), by='1 month')
+date_range <- seq.Date(from=as.Date(min(inventory$date)), to=as.Date(max(inventory$date)), by='1 month')
 
 # Initialize a data frame
 weather <- data.table()
@@ -229,6 +232,9 @@ keep = c("date","temp_max","temp_min","conditions","rain","snow","humidity","win
 names = names[!names %in% keep]
 weather[,(names):=NULL]
 
+table(weather$conditions)
+# weather[conditions=="Hail",conditions:="Thunderstorm"]
+
 ```
 
 # Grabbing the 10-day Forecast Data
@@ -267,6 +273,9 @@ dt[,holiday:=get_holiday(listHolidays("US"),date)]
 # adding day of the week
 dt[,day:=weekdays(date)]
 
+# adding month
+dt[,month:=month(date)]
+
 # creating average use compared to previous 7 days, 3 days, 1 day
 dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)) , FUN=mean, fill="extend"),
           use3=rollapply(use_actual, width=list(-(3:1)) , FUN=mean, fill="extend"),
@@ -285,22 +294,22 @@ test = dt[-inTrain$Resample1,]
 train = copy(dt)
 
 # adding average use for day of week by season
-train[,':=' (avgUse=mean(use_actual),
+train[!is.na(use_actual),':=' (avgUse=mean(use_actual),
              medUse=median(use_actual),
              quart1Use=quantile(use_actual)[2],
              quart3Use=quantile(use_actual)[4],
              maxUse=max(use_actual)),
-      by=day]
+      by=.(day,month)]
 
-test[,':=' (avgUse=mean(use_actual),
+test[!is.na(use_actual),':=' (avgUse=mean(use_actual),
              medUse=median(use_actual),
              quart1Use=quantile(use_actual)[2],
              quart3Use=quantile(use_actual)[4],
              maxUse=max(use_actual)),
-      by=day]
+      by=.(day,month)]
 
 # center and scale all numerical features
-train[,':=' (temp_maxz=scale(temp_max),
+train[!is.na(use_actual),':=' (temp_maxz=scale(temp_max),
            temp_minz=scale(temp_min),
            humidityz=scale(humidity),
            windz=scale(wind),
@@ -314,7 +323,7 @@ train[,':=' (temp_maxz=scale(temp_max),
            quart1Usez=scale(quart1Use),
            quart3Usez=scale(quart3Use),
            maxUsez=scale(maxUse))]
-test[,':=' (temp_maxz=scale(temp_max),
+test[!is.na(use_actual),':=' (temp_maxz=scale(temp_max),
            temp_minz=scale(temp_min),
            humidityz=scale(humidity),
            windz=scale(wind),
@@ -333,9 +342,13 @@ test[,':=' (temp_maxz=scale(temp_max),
 train$day = as.factor(train$day)
 train$season = as.factor(train$season)
 train$conditions = as.factor(train$conditions)
+train$month = as.factor(train$month)
+train$holiday = as.factor(train$holiday)
 test$day = as.factor(test$day)
 test$season = as.factor(test$season)
 test$conditions = as.factor(test$conditions)
+test$month = as.factor(test$month)
+test$holiday = as.factor(test$holiday)
 
 ```
 
@@ -345,28 +358,32 @@ test$conditions = as.factor(test$conditions)
 
 # haven't fixed snowz and removing seasons and conditions
 
-ntrain = train[,.(use_actual,day,conditions,season,holiday,
+ntrain = train[,.(use_actual,day,conditions,season,holiday,month,
                   temp_maxz,temp_minz,humidityz,windz,rainz,snowz,
                   use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
 
-# preping for fit
-ntrain = train[,.(use_actual,day,conditions,season,holiday,
+# preping for fi
+ntrain = train[,.(use_actual,day,conditions,season,holiday,month,
                   temp_maxz,temp_minz,humidityz,windz,rainz,snowz,
                   use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
-ntest = test[,.(date,use_actual,use_expected,day,conditions,season,holiday,
+ntest = test[,.(date,use_actual,use_expected,day,conditions,season,holiday,month,
                   temp_maxz,temp_minz,humidityz,windz,rainz,snowz,
                   use7z,use3z,use1z,avgUsez,medUsez,quart1Usez,quart3Usez,maxUsez)]
 
-rfuse = randomForest(use_actual ~ day + holiday +
+rfuse = randomForest(use_actual ~ day + holiday + conditions + season + month +
                   temp_maxz + temp_minz + humidityz + windz  + rainz +
-                  use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez, data = ntrain)
+                  use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez,
+                  data = ntrain[!is.na(use_actual)])
 
 save(rfuse,file="rfuse.RData")
 
 ntest[,use_predicted:=round(predict(rfuse,ntest,type="response"))]
 # ntest[,.(date,day,use_actual,use_predicted,use_expected)]
 
-imp = importance(rfuse)
+imp = as.data.frame(importance(rfuse))
+imp[,2] <- rownames(imp)
+imp[order(-imp$IncNodePurity),]
+
 MAE = mean(abs(ntest$use_actual-ntest$use_predicted))
 MAE_baseline = mean(abs(ntest$use_actual-ntest$use_expected))
 
@@ -377,6 +394,8 @@ ggplot(ntest,aes(x=ntest$use_actual)) +
    geom_point(aes(y=ntest$use_predicted),color="red") +
    geom_point(aes(y=ntest$use_expected),color="blue") +
    geom_abline(slope = 1,intercept = 0)
+
+write.csv(dt,file="pyrodata.csv",row.names=FALSE)
 
 ```
 

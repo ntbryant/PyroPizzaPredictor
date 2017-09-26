@@ -14,6 +14,42 @@ library(ggplot2)
 library(data.table)
 
 # Helper Functions
+get_monthly_weather <- function(airport="PDX", date=as.Date("2016-12-19")) {
+  
+  url <- paste0('https://www.wunderground.com/history/airport/',airport,'/',
+                year(date),'/',
+                month(date),'/',
+                day(date),'/',
+                'MonthlyHistory.html')
+  
+  page <- read_html(url)
+  closeAllConnections()
+  
+  weather_data <- page %>%
+    html_nodes("table") %>%
+    .[[4]] %>%
+    html_table() %>%
+    as.data.table()
+  
+  setnames(weather_data, c("day","temp_max","temp_avg","temp_min",
+                           "dew_high","dew_avg","dew_low",
+                           "humidity_high","humidity","humidity_low",
+                           "pressure_high","pressure_avg","pressure_low",
+                           "visibility_high","visibility_avg","visibility_low",
+                           "wind_high","wind","wind_dir",
+                           "precipitation","conditions"))
+  weather_data = weather_data[-1]
+  weather_data[,month:=month(date)]
+  weather_data[,year:=year(date)]
+  weather_data[,date:=ymd(paste(year,month,day,sep="-"))]
+  
+  # convert columns to numeric
+  names = colnames(weather_data)
+  ignore = c("conditions","date","precipitation")
+  names = names[!names %in% ignore]
+  dtnew <- weather_data[,(names):=lapply(.SD, as.numeric), .SDcols = names]
+}
+
 get_weather_forecast <- function(airport="PDX")
 {
   base_url <- paste0('http://api.wunderground.com/api/',wu.apikey,'/')
@@ -77,11 +113,14 @@ get_weather_condition = function(conditions1,conditions2,conditions3) {
 # Pyro Pizza Data ############
 ##############################
 
-# (my_sheets <- gs_ls())
-# fin2016 = gs_title("2016 Springwater Ledger")
-pyro = gs_key("1MzRbJdaHKv9CJMPeN7Z-WQtdoGuLWAyE9gvYS-_Mgc8")
-# gs_ws_ls(fin2016)
-inventory = pyro %>% gs_read_csv(ws = "12th INVENTORY", skip=0) %>% as.data.table
+pyrodata = setDT(read.csv(file="pyrodata.csv"))
+pyrodata[,date:=as.Date(date)]
+
+# # (my_sheets <- gs_ls())
+# # fin2016 = gs_title("2016 Springwater Ledger")
+pyro = gs_key("18eViJiRTmdNkYtZrwOpHqy-39RrhamL8EfemAvuhPXM")
+# # gs_ws_ls(fin2016)
+inventory = pyro %>% gs_read_csv(ws = "INVENTORY", skip=0) %>% as.data.table
 
 # fixing the dates in the 2016 data
 setnames(inventory,colnames(inventory),c("date","day","initial_inventory","par","prep_rec","prep_actual","waste","final_inventory","short_long","scale","use_expected","use_actual","temp","precip","clouds","sun","wind","humidity","holiday","event"))
@@ -95,7 +134,9 @@ inventory[,prep_rec:=as.double(prep_rec)]
 inventory[,prep_actual:=as.double(prep_actual)]
 inventory[,waste:=as.double(waste)]
 inventory[,final_inventory:=as.double(final_inventory)]
-inventory = inventory[use_actual!=0]
+inventory[,short_long:=as.double(short_long)]
+# inventory = inventory[use_actual!=0]
+# inventory = inventory[!is.na(use_actual)]
 
 ##############################
 # Forecast Data ############
@@ -119,28 +160,25 @@ forecast[,temp_max:=as.numeric(temp_max)]
 forecast[,temp_min:=as.numeric(temp_min)]
 
 # getting rid of "Chance of a "
-gsub("Chance of a ","",forecast$conditions)
+forecast$conditions = gsub("Chance of a ","",forecast$conditions)
+forecast$conditions = gsub("Chance of ","",forecast$conditions)
+table(forecast$conditions)
 
-weather = setDT(read.csv(file="weather-09152017.csv"))
-weather[,date:=as.Date(date)]
-
-# reducing to the forecast variables
-names = colnames(weather)
-keep = c("date","temp_max","temp_min","conditions","rain","snow","humidity","wind")
-names = names[!names %in% keep]
-weather[,(names):=NULL]
-neworder = names(forecast)
-setcolorder(weather,neworder)
-
-weather = rbind(weather,forecast)
-table(weather$conditions)
+# changing conditions to match conditions from the training data
+forecast[conditions=="Clear",conditions:="Scattered Clouds"]
+forecast[conditions=="Hail",conditions:="Thunderstorm"]
 
 ##############################
-# Preparing Features ############
+# Preparing Features #########
 ##############################
 
-# merging inventory and weather
-dt = merge(inventory,weather,by="date",all.y=TRUE)
+# merging inventory and forecast
+dt <- merge(inventory,forecast,by="date",all=TRUE)
+
+# combining pyrodata and current inventory with forecast
+names <- colnames(dt)
+pyrodata <- pyrodata[,names,with=FALSE]
+dt = rbind(pyrodata[date<Sys.Date()],dt[date>=Sys.Date()])
 
 # adding seasons
 dt[,season:=get_season(date)]
@@ -151,41 +189,23 @@ dt[,holiday:=get_holiday(listHolidays("US"),date)]
 # adding day of the week
 dt[,day:=weekdays(date)]
 
-#####################################
-# Delete this section after adding actual data
-#######################################
+# adding day
+dt[,day:=weekdays(date)]
 
-# adding in dummy use_actual until all the data is available
-dt[is.na(use_actual) & date<Sys.Date(),use_actual:=
-     as.double(sample(100:600,1)),by=date]
-
-#########################################
+# adding day
+dt[,month:=month(date)]
 
 # creating average use compared to previous 7 days, 3 days, 1 day
 dt[,':=' (use7=rollapply(use_actual, width=list(-(7:1)), FUN=mean, fill="extend", na.rm=T),
           use3=rollapply(use_actual, width=list(-(3:1)), FUN=mean, fill="extend", na.rm=T),
           use1=rollapply(use_actual, width=list(-(1:1)), FUN=mean, fill="extend", na.rm=T))]
 
-# creating use 3 and use 1 for forecast data
+# creating use 3, use 1, and use 7 for forecast data
 dt[,use3:=ifelse(is.na(use3),.SD[match(date - 7,.SD[,date]),use3],use3)]
 dt[,use1:=ifelse(is.na(use1),.SD[match(date - 7,.SD[,date]),use1],use1)]
+dt[,use7:=ifelse(is.na(use7),.SD[match(date - 7,.SD[,date]),use7],use7)]
 
-#####################################
-# Delete this section after adding actual data
-#######################################
-
-dt[is.na(use3),use3:=sample(dt[!is.na(use3),use3],1),by=date]
-dt[is.na(use1),use1:=sample(dt[!is.na(use1),use1],1),by=date]
-
-# # eliminating conditions not in the training data
-# training_conditions = c("Fog","Overcast","Rain","Snow")
-# dt = dt[conditions %in% training_conditions]
-# table(dt$conditions)
-# dt$conditions = as.character(dt$conditions)
-
-#############################################
-
-# adding average use for day of week by season
+# adding average use for day of week by month
 dt[,':=' (avgUse=mean(use_actual, na.rm=T),
              medUse=median(use_actual, na.rm=T),
              quart1Use=quantile(use_actual, na.rm=T)[2],
@@ -212,25 +232,40 @@ dt[, ':=' (temp_maxz=scale(temp_max),
 # making the categorical variables factors
 dt$day = as.factor(dt$day)
 dt$season = as.factor(dt$season)
-# dt$conditions = as.character(dt$conditions)
+dt$conditions = as.character(dt$conditions)
 dt$conditions = as.factor(dt$conditions)
+dt$month = as.factor(dt$month)
+dt$holiday = as.factor(dt$holiday)
 
 ##############################
 # Predictor ############
 ##############################
 
-load(file="rfuse.RData")
+# load(file="rfuse.RData")
+
+rfuse = randomForest(use_actual ~ day + holiday + conditions + season + month +
+                  temp_maxz + temp_minz + humidityz + windz  + rainz +
+                  use7z + use3z + use1z + avgUsez + medUsez + quart1Usez + quart3Usez + maxUsez,
+                  data = dt[!is.na(use_actual) & use_actual!=0])
 
 dt[,use_predicted:=round(predict(rfuse,dt,type="response"))]
 dt[order(-date)]
 
-dt[,par:=ifelse(is.na(par),rollapply(use_predicted,
+write.csv(dt,file="pyrodata.csv")
+
+# imp = importance(rfuse)
+# MAE = mean(abs(dt$use_actual-dt$use_predicted),na.rm=T)
+# MAE_baseline = mean(abs(dt$use_actual-dt$use_expected), na.rm=T)
+# 
+# R2 <- 1 - (sum((ntest$use_actual-ntest$use_predicted)^2)/sum((ntest$use_actual-mean(ntest$use_actual))^2))
+# R2_baseline <- 1 - (sum((ntest$use_actual-ntest$use_expected)^2)/sum((ntest$use_actual-mean(ntest$use_actual))^2))
+
+dt[,par:=ifelse(date==Sys.Date(),rollapply(use_predicted,
                              width=4,
                              align="right",
                              FUN=sum,
-                             fill="extend",
-                             na.rm=T),
-                par)]
+                             # fill="extend",
+                             na.rm=T),par)]
 
 # importance(rfuse)
 # MAE = mean(abs(dt$use_actual-dt$use_predicted))
@@ -239,6 +274,6 @@ dt[,par:=ifelse(is.na(par),rollapply(use_predicted,
 # R2 <- 1 - (sum((dt$use_actual-dt$use_predicted)^2)/sum((dt$use_actual-mean(dt$use_actual))^2))
 # R2_baseline <- 1 - (sum((dt$use_actual-dt$use_expected)^2)/sum((dt$use_actual-mean(dt$use_actual))^2))
 
-
+# dt[date==Sys.Date(),short_long:=final_inventory - par]
 
 

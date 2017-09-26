@@ -30,16 +30,18 @@ shinyServer(function(input, output) {
              use7,use3,use1,avgUse,medUse,quart1Use,quart3Use)]
   DF[order(-date)]
   outdir=getwd()
-  outfilename="table"
+  outfilename="pyrodata"
   
   values <- reactiveValues(hot = DF)
   
   # update dough prediction box
   observeEvent(input$submitInventory, {
+    
+    prep <- (round((dt[date==Sys.Date(),par] - input$inventory) / 15) * 15)
 
     output$expected_use = renderText({
       
-      (round((dt[date==Sys.Date(),par] - input$inventory) / 15) * 15)
+      ifelse(prep<=0,0,prep)
       
     })
 
@@ -54,18 +56,17 @@ shinyServer(function(input, output) {
       if (input$submitInventory) {
         
         DF[date==Sys.Date(),initial_inventory:=input$inventory]
-        DF[date==Sys.Date(),prep_rec:=round((par - initial_inventory)
-                                            / 15) * 15]
+        DF[date==Sys.Date(),prep_rec:=ifelse((par - initial_inventory)<=0,
+                                             0,
+                                             round((par - initial_inventory) / 15) * 15)]
         
         DF[is.na(final_inventory),
            final_inventory:=sum(initial_inventory,
                                 prep_actual,
                                 -waste,na.rm = TRUE),by=date]
-
-        DF[,use_actual:=ifelse(date==Sys.Date()-1,sum(final_inventory,
-                                                    -(.SD[match(date + 1,.SD[,date]),initial_inventory]),
-                                                    na.rm=TRUE),
-                                use_actual)]
+        
+        DF[date==Sys.Date()-1, use_actual:=
+             sum(DF[date==Sys.Date()-1,final_inventory],-DF[date==Sys.Date(),initial_inventory])]
         
         DF[date==Sys.Date(),short_long:=final_inventory - par]
       }
@@ -87,8 +88,29 @@ shinyServer(function(input, output) {
     } else {
       if (is.null(values[["DF"]]))
         DF <- DF
-      else
+      else {
         DF <- values[["DF"]]
+        
+        DF[date==Sys.Date(),prep_rec:=ifelse((par - initial_inventory)<=0,
+                                             0,
+                                             round((par - initial_inventory) / 15) * 15)]
+        
+        DF[is.na(final_inventory),
+           final_inventory:=sum(initial_inventory,
+                                prep_actual,
+                                -waste,na.rm = TRUE),by=date]
+        
+        DF[date==Sys.Date()-1, use_actual:=
+             sum(DF[date==Sys.Date()-1,final_inventory],-DF[date==Sys.Date(),initial_inventory])]
+        
+        DF[date==Sys.Date(),short_long:=final_inventory - par]
+        
+        DF[date==Sys.Date(),scale:=(round((par - (final_inventory - use_predicted))
+                                          / 15) * 15) + ifelse(prep_rec > prep_actual,
+                                                              round((prep_rec - prep_actual)
+                                                                    / 15) * 15,0)]
+      }
+      
     }
     values[["DF"]] <- DF
   })
@@ -116,7 +138,8 @@ shinyServer(function(input, output) {
   ## Save 
   observeEvent(input$save, {
     finalDF <- isolate(values[["DF"]])
-    saveRDS(finalDF, file=file.path(outdir, sprintf("%s.rds", outfilename)))
+    write.csv(finalDF,file=file.path(outdir, sprintf("%s.rds", outfilename)))
+    # saveRDS(finalDF, file=file.path(outdir, sprintf("%s.rds", outfilename)))
   })
   
 })

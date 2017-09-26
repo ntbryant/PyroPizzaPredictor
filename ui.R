@@ -52,8 +52,8 @@ ui <- dashboardPage(
                                                       label=TRUE,
                                                       abbr=FALSE)," is ",
                                       dt[date==(Sys.Date()+4),use_predicted],
-                                      " pizzas. Given current inventory and the expected use of ",
-                                      dt[date==Sys.Date(),par],
+                                      " pizzas. Given current inventory and the expected
+                                      use of ",dt[date==Sys.Date(),par],
                                       " doughs over the next four days, recommended prep
                                       for today is:"))),
                   h1(textOutput("expected_use"), align = "center")
@@ -71,15 +71,15 @@ ui <- dashboardPage(
                   numericInput("waste",NULL,value=NA),
                   actionButton("submitPrep" ,"Submit")
                 )
-              )
+              ),
               
-              # fluidRow(
-              #   box(
-              #     title = "Weather Forecast",
-              #     solidHeader = TRUE,
-              #     status = "warning",
-              #     htmlOutput("frame"))
-              # )
+              fluidRow(
+                tags$iframe(
+                  seamless = "seamless", 
+                  src = "https://forecast.io/embed/#lat=45.5121&lon=-122.6535&name=Downtown Portland",
+                  height = 800, width = 1400
+                )
+              )
       ),
       
       # Spreadsheet

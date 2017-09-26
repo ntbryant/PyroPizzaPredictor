@@ -1,0 +1,11 @@
+name: PyroPizzaPredictor
+title: PyroPizzaPredictor
+account: nicktb
+server: shinyapps.io
+appId: 217287
+bundleId: 997127
+url: https://nicktb.shinyapps.io/PyroPizzaPredictor/
+when: 1506383709.07159
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .RData|app.R|forecast.csv|global-training.R|pyrodata2.csv|pyropizza.nb.html|pyropizza.rmd|rfuse.RData|data/- Master Sheet - Summer 2017.xlsx|data/- Master Sheet - Winter 2017.xlsx|data/inventory.csv|data/weather-09152017.csv|data/weather-09222017-formatted.csv|data/weather-09222017.csv
